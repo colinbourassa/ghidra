@@ -30,7 +30,7 @@ public class UnixAoutMachineType {
     // The 10-bit Machine ID field would also interfere with flags used by VxWorks, NetBSD, and
     // probably others.
 
-    public final static short M_OLDSUN2        = 0x00;
+    public final static short M_UNKNOWN        = 0x00;
     public final static short M_68010          = 0x01;
     public final static short M_68020          = 0x02;
     public final static short M_SPARC          = 0x03;

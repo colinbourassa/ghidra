@@ -34,7 +34,6 @@ public class UnixAoutHeader {
     private String compilerSpec = "default";
     private long pageSize;
 
-    private boolean isOldSun2 = false;
     private boolean isNetBSD = false;
     private boolean isSparc = false;
 
@@ -87,14 +86,15 @@ public class UnixAoutHeader {
         this.a_drsize = reader.readNextUnsignedInt();
         this.binarySize = reader.length();
 
-        // NOTE: In NetBSD/i386 examples of a.out, the 32-bit a_magic/midmag word seems to
-        // always be written in big-endian regardless of the data endianness in the rest of
-        // the file. Are there other examples of this?
-        if (isLittleEndian) {
-            this.a_magic = Integer.reverseBytes((int)this.a_magic); 
+        checkExecutableType();
+
+        // NOTE: In NetBSD/i386 examples of a.out, the "new-style" 32-bit a_magic/midmag word
+        // is written in big-endian regardless of the data endianness in the rest of the file.
+        if ((this.exeType == ExecutableType.UNKNOWN) && isLittleEndian) {
+            this.a_magic = Integer.reverseBytes((int)this.a_magic);
+            checkExecutableType();
         }
 
-        checkExecutableType();
         checkMachineTypeValidity(isLittleEndian);
         determineTextOffset(isLittleEndian);
 
@@ -225,9 +225,6 @@ public class UnixAoutHeader {
         case UnixAoutMachineType.M_68010:
             this.languageSpec = "68000:BE:32:MC68010";
             break;
-        case UnixAoutMachineType.M_OLDSUN2:
-            this.isOldSun2 = true;
-            this.pageSize = 2048;
         case UnixAoutMachineType.M_68020:
             this.languageSpec = "68000:BE:32:MC68020";
             break;
@@ -300,10 +297,10 @@ public class UnixAoutHeader {
         case UnixAoutMachineType.M_ARM6_NETBSD:
             this.isNetBSD = true;
         case UnixAoutMachineType.M_ARM:
-            this.languageSpec = "ARM:" + readEndianness + "32:default";
+            this.languageSpec = "ARM:" + readEndianness + ":32:default";
             break;
         case UnixAoutMachineType.M_AARCH64:
-            this.languageSpec = "AARCH64:" + readEndianness + "64:default";
+            this.languageSpec = "AARCH64:" + readEndianness + ":64:default";
             break;
 
             /**
@@ -324,15 +321,15 @@ public class UnixAoutHeader {
              */
         case UnixAoutMachineType.M_POWERPC_NETBSD:
             this.isNetBSD = true;
-            this.languageSpec = "PowerPC:" + readEndianness + "32:default";
+            this.languageSpec = "PowerPC:" + readEndianness + ":32:default";
             break;
         case UnixAoutMachineType.M_POWERPC64:
-            this.languageSpec = "PowerPC:" + readEndianness + "64:default";
+            this.languageSpec = "PowerPC:" + readEndianness + ":64:default";
             break;
 
             /**
              * SuperH family
-             * Note: It's unclear if there is support for SuperH SH-3 or SH-5 cores;
+             * NOTE: It's unclear if there is support for SuperH SH-3 or SH-5 cores;
              * the primary SuperH language seems to support SH-1 and SH-2 variants
              * and the alternative is the SuperH4 language.
              */
@@ -363,11 +360,14 @@ public class UnixAoutHeader {
         case UnixAoutMachineType.M_ALPHA_NETBSD:
             this.isNetBSD = true;
         case UnixAoutMachineType.M_IA64:
-            this.languageSpec = "UNKNOWN:" + readEndianness + "64:default";
+            this.languageSpec = "UNKNOWN:" + readEndianness + ":64:default";
             break;
         case UnixAoutMachineType.M_29K:
         case UnixAoutMachineType.M_88K_OPENBSD:
-            this.languageSpec = "UNKNOWN:" + readEndianness + "32:default";
+            this.languageSpec = "UNKNOWN:" + readEndianness + ":32:default";
+            break;
+        case UnixAoutMachineType.M_UNKNOWN:
+            this.languageSpec = "UNKNOWN:" + readEndianness + ":32:default";
             break;
         default:
             this.machineTypeValid = false;
@@ -426,7 +426,7 @@ public class UnixAoutHeader {
      * This routine should attempt to replicate the logic from the N_TXTOFF macro
      * that appears in the different incarnations of a.out.h.
      *
-     * TODO: The FreeBSD imgact_aout.h implies that, if the a_magic word contains
+     * NOTE: The FreeBSD imgact_aout.h implies that, if the a_magic word contains
      * ZMAGIC when read as little endian, the file offset for .text is __LDPGSZ;
      * otherwise, if a_magic contains ZMAGIC when read as big endian, the file offset
      * for .text is 0. Indeed, it looks like NetBSD uses big-endian ordering for
@@ -435,14 +435,11 @@ public class UnixAoutHeader {
      */
     private void determineTextOffset(boolean isLittleEndian) {
 
-        if (this.isOldSun2) {
-            this.txtOffset = this.pageSize;
-        }
         // Some combinations of executable type and architecture actually include the
         // header in the .text section. This includes QMAGIC type and some (most? all?)
         // big-endian ZMAGICs.
-        else if ((this.exeType == ExecutableType.QMAGIC) ||
-                (this.exeType == ExecutableType.ZMAGIC)) {
+        if ((this.exeType == ExecutableType.QMAGIC) ||
+            (this.exeType == ExecutableType.ZMAGIC)) {
             this.txtOffset = 0;
 
         } else {
@@ -456,15 +453,9 @@ public class UnixAoutHeader {
      */
     private void determineTextAddr() {
 
-        if (this.isOldSun2) {
-            // Special case defined by SunOS 4.1.3, sys/sparc/a.out.h.
-            // This is the SunOS 2 *segment size*, which we don't keep track of
-            // separately from the page size.
-            this.txtAddr = 0x8000;
-
-        } else if ( (this.isSparc && (this.exeType == ExecutableType.NMAGIC)) ||
-                (this.isNetBSD) ||
-                (this.exeType == ExecutableType.QMAGIC)) {
+        if ((this.isSparc && (this.exeType == ExecutableType.NMAGIC)) ||
+            (this.isNetBSD) ||
+            (this.exeType == ExecutableType.QMAGIC)) {
             this.txtAddr = this.pageSize;
 
         } else {
