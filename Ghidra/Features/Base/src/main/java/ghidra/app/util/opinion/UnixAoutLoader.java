@@ -25,6 +25,7 @@ import ghidra.app.util.bin.ByteProvider;
 import ghidra.app.util.bin.format.aout.UnixAoutHeader.ExecutableType;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.app.util.opinion.AbstractProgramWrapperLoader;
+import ghidra.app.util.opinion.Loader;
 import ghidra.app.util.opinion.LoadSpec;
 import ghidra.framework.store.LockException;
 import ghidra.program.flatapi.FlatProgramAPI;
