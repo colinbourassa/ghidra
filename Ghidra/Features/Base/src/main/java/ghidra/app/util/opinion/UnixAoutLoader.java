@@ -156,21 +156,6 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			}
 		}
 
-		// Create the .bss segment based on its reported starting address and size
-		if (bssSize > 0) {
-			Address bssAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getBssAddr());
-			try {
-				bssBlock = program.getMemory().createUninitializedBlock(filename + ".bss", bssAddr, dataSize,
-						isOverlay);
-				bssAddrSpace = bssBlock.getStart().getAddressSpace();
-				bssBlock.setRead(true);
-				bssBlock.setWrite(true);
-				bssBlock.setExecute(false);
-			} catch (LockException | IllegalArgumentException | MemoryConflictException | AddressOverflowException e) {
-				e.printStackTrace();
-			}
-		}
-
 		BinaryReader reader = new BinaryReader(provider, !bigEndian);
 
 		Vector<UnixAoutSymbolTableEntry> symTab = getSymbolTable(reader, header.getSymOffset(), header.getSymSize(),
@@ -182,6 +167,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		Vector<UnixAoutRelocationTableEntry> dataRelocTab = getRelocationTable(reader, header.getDataRelocOffset(),
 				header.getDataRelocSize());
 
+		Hashtable<String, Long> bssSymbols = new Hashtable<String, Long>();
 		Hashtable<String, Long> possibleBssSymbols = new Hashtable<String, Long>();
 		Hashtable<Address, String> localFunctions = new Hashtable<Address, String>();
 
@@ -204,13 +190,12 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 								SourceType.IMPORTED);
 
 					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_BSS) {
-						if (bssAddrSpace != null) {
-							api.createLabel(bssAddrSpace.getAddress(symTabEntry.value), symTabEntry.name, namespace,
-									true, SourceType.IMPORTED);
-						} else {
-							log.appendMsg("Warning: symbol '" + symTabEntry.name
-									+ "' assigned to BSS but .bss segment size is 0");
-						}
+						// Save the symbols that are explicitly identified as being in .bss
+            // to a list so that they can be labeled later (after we actually
+            // create the .bss block, which must wait until after we total all
+            // the space used by N_UNDF symbols; see below.)
+						bssSymbols.put(symTabEntry.name, symTabEntry.value);
+
 					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_UNDF) {
 						// This is a special case given by the A.out spec: if the linker cannot find
 						// this
@@ -226,33 +211,52 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		}
 
 		// Add up the sizes of all the symbols that are supposed to be allocated
-		// in .bss, and ensure that our .bss segment size can accommodate them.
+		// in .bss, and ensure that our .bss segment has enough additional space
+		// to accommodate them (beyond the size allocated by the header.)
 		// Until we search the global symbol table for the symbols in the
 		// 'possibleBssSymbols' list (which will happen as we walk the relocation
 		// table, below), we won't know whether these symbols exist in another
 		// binary file that was previously loaded, or, instead, if we'll need to
 		// mimic the linker behavior and assign them space in .bss.
-		Long requiredBssSize = (long) 0;
+		Long additionalBssSpace = (long) 0;
 		for (Long symbolSize : possibleBssSymbols.values()) {
-			requiredBssSize += symbolSize;
+			additionalBssSpace += symbolSize;
 		}
 
-		if (requiredBssSize > bssSize) {
-			bssSize = requiredBssSize;
-		}
+		// Keep track of the next available location in .bss. The dynamically
+    // located symbols (of N_UNDF type) will start after the fix section.
+		long bssLocation = bssSize;
 
+		bssSize += additionalBssSpace;
 		if (bssSize > 0) {
+			Address bssAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getBssAddr());
 			try {
-				bssBlock = api.createMemoryBlock(filename + ".bss", api.toAddr(header.getBssAddr()), null, bssSize,
-						isOverlay);
+				bssBlock = program.getMemory().createUninitializedBlock(filename + ".bss", bssAddr, bssSize, isOverlay);
 				bssAddrSpace = bssBlock.getStart().getAddressSpace();
+				bssBlock.setRead(true);
+				bssBlock.setWrite(true);
+				bssBlock.setExecute(false);
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
 		}
 
-		// Keep track of the next available location in .bss
-		long bssLocation = header.getBssAddr();
+    if (bssSymbols.size() > 0) {
+      if (bssAddrSpace != null) {
+        try {
+          for (String bssSymbolName : bssSymbols.keySet()) {
+            final Long bssSymbolAddr = bssSymbols.get(bssSymbolName);
+            api.createLabel(bssAddrSpace.getAddress(bssSymbolAddr), bssSymbolName, namespace,
+                true, SourceType.IMPORTED);
+          }
+        } catch (Exception e) {
+          e.printStackTrace();
+        }
+      } else {
+        log.appendMsg("Warning: some symbols were identified as being in .bss, but .bss could not be created.");
+      }
+    }
+
 
 		///////////////////////////////////////
 		// Process the .text relocation table
