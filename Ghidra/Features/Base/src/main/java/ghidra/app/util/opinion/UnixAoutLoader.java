@@ -284,6 +284,10 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		}
   }
 
+  /**
+   * Processes the text relocation table by fixing addresses based on the true location of each
+   * symbol.
+   */
   protected void processTextRelocation() {
 		for (Integer i = 0; i < this.textRelocTab.size(); i++) {
 
@@ -355,6 +359,10 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		}
   }
 
+  /**
+   * Processes the data relocation table by fixing addresses based on the true location of each
+   * symbol.
+   */
   protected void processDataRelocation(long dataAddrFromHeader) {
 		for (Integer i = 0; i < this.dataRelocTab.size(); i++) {
 
@@ -414,6 +422,10 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		}
   }
 
+  /**
+   * Walks through the table of local function addresses, marks the locations as functions, and
+   * starts disassembly of those routines.
+   */
   protected void disassembleKnownFuncs() {
 		// Now that all relocation addresses have been rewritten, it's safe to start disassembly
 		// at all the known function entry points.
