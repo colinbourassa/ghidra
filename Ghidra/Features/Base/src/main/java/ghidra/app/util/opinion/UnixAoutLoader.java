@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -61,27 +61,27 @@ import ghidra.util.task.TaskMonitor;
  */
 public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
-  MemoryBlock textBlock;
-  AddressSpace textAddrSpace;
-  MemoryBlock dataBlock;
-  AddressSpace dataAddrSpace;
-  MemoryBlock bssBlock;
-  AddressSpace bssAddrSpace;
-  Hashtable<String,Long> bssSymbols;
-  Hashtable<String,Long> possibleBssSymbols;
-  Namespace namespace;
-  Vector<UnixAoutSymbolTableEntry> symTab;
-  Vector<UnixAoutRelocationTableEntry> textRelocTab;
-  Vector<UnixAoutRelocationTableEntry> dataRelocTab;
+	MemoryBlock textBlock;
+	AddressSpace textAddrSpace;
+	MemoryBlock dataBlock;
+	AddressSpace dataAddrSpace;
+	MemoryBlock bssBlock;
+	AddressSpace bssAddrSpace;
+	Hashtable<String,Long> bssSymbols;
+	Hashtable<String,Long> possibleBssSymbols;
+	Namespace namespace;
+	Vector<UnixAoutSymbolTableEntry> symTab;
+	Vector<UnixAoutRelocationTableEntry> textRelocTab;
+	Vector<UnixAoutRelocationTableEntry> dataRelocTab;
 	Hashtable<Address,String> localFunctions = new Hashtable<Address, String>();
-  long bssLocation = 0;
-  FlatProgramAPI api;
-  Program program;
-  MessageLog log;
-  UnixAoutHeader header;
-  String filename;
-  boolean isOverlay;
-  boolean bigEndian;
+	long bssLocation = 0;
+	FlatProgramAPI api;
+	Program program;
+	MessageLog log;
+	UnixAoutHeader header;
+	String filename;
+	boolean isOverlay;
+	boolean bigEndian;
 
 	@Override
 	public String getName() {
@@ -118,62 +118,62 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		return loadSpecs;
 	}
 
-  /**
-   * Creates an AddressSpace and MemoryBlock for the .text section of the binary, reading its
-   * contents from the provider.
-   */
-  protected void createTextSection(ByteProvider provider, TaskMonitor monitor, long size,
-    long addressFromHeader, long fileOffset) {
+	/**
+	 * Creates an AddressSpace and MemoryBlock for the .text section of the binary, reading its
+	 * contents from the provider.
+	 */
+	protected void createTextSection(ByteProvider provider, TaskMonitor monitor, long size,
+									 long addressFromHeader, long fileOffset) {
 
 		if (size > 0) {
 			Address address =
-        this.program.getAddressFactory().getDefaultAddressSpace().getAddress(addressFromHeader);
+				this.program.getAddressFactory().getDefaultAddressSpace().getAddress(addressFromHeader);
 			try {
 				InputStream stream = provider.getInputStream(fileOffset);
 				this.textBlock = this.program.getMemory().createInitializedBlock(
-          this.filename + ".text", address, stream, size, monitor, this.isOverlay);
+									 this.filename + ".text", address, stream, size, monitor, this.isOverlay);
 				this.textBlock.setRead(true);
 				this.textBlock.setWrite(false);
 				this.textBlock.setExecute(true);
 				this.textAddrSpace = textBlock.getStart().getAddressSpace();
 			} catch (LockException | MemoryConflictException | AddressOverflowException |
-               CancelledException | IOException e) {
+						 CancelledException | IOException e) {
 				e.printStackTrace();
 			}
 		}
-  }
+	}
 
-  /**
-   * Creates an AddressSpace and MemoryBlock for the .data section of the binary, reading its
-   * contents from the provider.
-   */
-  protected void createDataSection(ByteProvider provider, TaskMonitor monitor, long size,
-    long addressFromHeader, long fileOffset) {
+	/**
+	 * Creates an AddressSpace and MemoryBlock for the .data section of the binary, reading its
+	 * contents from the provider.
+	 */
+	protected void createDataSection(ByteProvider provider, TaskMonitor monitor, long size,
+									 long addressFromHeader, long fileOffset) {
 
 		if (size > 0) {
 			Address address =
-        program.getAddressFactory().getDefaultAddressSpace().getAddress(addressFromHeader);
+				program.getAddressFactory().getDefaultAddressSpace().getAddress(addressFromHeader);
 			try {
 				InputStream stream = provider.getInputStream(fileOffset);
 				this.dataBlock = program.getMemory().createInitializedBlock(
-          this.filename + ".data", address, stream, size, monitor, this.isOverlay);
+									 this.filename + ".data", address, stream, size, monitor, this.isOverlay);
 				this.dataBlock.setRead(true);
 				this.dataBlock.setWrite(true);
 				this.dataBlock.setExecute(false);
 				this.dataAddrSpace = dataBlock.getStart().getAddressSpace();
 			} catch (LockException | MemoryConflictException | AddressOverflowException |
-               CancelledException | IOException e) {
+						 CancelledException | IOException e) {
 				e.printStackTrace();
 			}
 		}
-  }
+	}
 
-  /**
-   * Creates a .bss section for this binary, ensuring that it has enough space to accommodate
-   * all of the symbols that are explictly assigned to .bss and also the symbols marked as
-   * N_UNDF and that need to be dynamically assigned space in this section.
-   */
-  protected void createBssSection(long bssSize) {
+	/**
+	 * Creates a .bss section for this binary, ensuring that it has enough space to accommodate
+	 * all of the symbols that are explictly assigned to .bss and also the symbols marked as
+	 * N_UNDF and that need to be dynamically assigned space in this section.
+	 */
+	protected void createBssSection(long bssSize) {
 		// Add up the sizes of all the symbols that are supposed to be allocated
 		// in .bss, and ensure that our .bss segment has enough additional space
 		// to accommodate them (beyond the size allocated by the header.)
@@ -188,16 +188,16 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		}
 
 		// Keep track of the next available location in .bss. The dynamically
-    // located symbols (of N_UNDF type) will start after the fix section.
+		// located symbols (of N_UNDF type) will start after the fix section.
 		this.bssLocation = bssSize;
 
 		bssSize += additionalBssSpace;
 		if (bssSize > 0) {
 			Address bssAddr = this.program.getAddressFactory().getDefaultAddressSpace().getAddress(
-        this.header.getBssAddr());
+								  this.header.getBssAddr());
 			try {
 				this.bssBlock = this.program.getMemory().createUninitializedBlock(this.filename + ".bss",
-          bssAddr, bssSize, this.isOverlay);
+								bssAddr, bssSize, this.isOverlay);
 				this.bssAddrSpace = bssBlock.getStart().getAddressSpace();
 				this.bssBlock.setRead(true);
 				this.bssBlock.setWrite(true);
@@ -206,40 +206,40 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				e.printStackTrace();
 			}
 		}
-  }
+	}
 
-  /**
-   * Labels the known symbols in the .bss section.
-   */
-  protected void placeBssSymbols() {
-    if (this.bssSymbols.size() > 0) {
-      if (this.bssAddrSpace != null) {
-        try {
-          for (String bssSymbolName : this.bssSymbols.keySet()) {
-            final Long bssSymbolAddr = this.bssSymbols.get(bssSymbolName);
-            this.api.createLabel(this.bssAddrSpace.getAddress(bssSymbolAddr), bssSymbolName,
-              this.namespace, true, SourceType.IMPORTED);
-          }
-        } catch (Exception e) {
-          e.printStackTrace();
-        }
-      } else {
-        this.log.appendMsg("Warning: some symbols were identified as being in .bss, but .bss" +
-          " could not be created.");
-      }
-    }
-  }
+	/**
+	 * Labels the known symbols in the .bss section.
+	 */
+	protected void placeBssSymbols() {
+		if (this.bssSymbols.size() > 0) {
+			if (this.bssAddrSpace != null) {
+				try {
+					for (String bssSymbolName : this.bssSymbols.keySet()) {
+						final Long bssSymbolAddr = this.bssSymbols.get(bssSymbolName);
+						this.api.createLabel(this.bssAddrSpace.getAddress(bssSymbolAddr), bssSymbolName,
+											 this.namespace, true, SourceType.IMPORTED);
+					}
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+			} else {
+				this.log.appendMsg("Warning: some symbols were identified as being in .bss, but .bss" +
+								   " could not be created.");
+			}
+		}
+	}
 
-  /**
-   * Processes the binary's symbol table, taking one of four different actions depending on the
-   * symbol type:
-   *  - N_TEXT are added to a list for disassembly later.
-   *  - N_DATA are labeled immediately.
-   *  - N_BSS are added to a list for labeling after the .bss section size has been established.
-   *  - N_UNDF are added to a list for address assignment and labeling in .bss if the symbol is
-   *    not found to already exist in a global symbol table (i.e. provided by another binary.)
-   */
-  protected void processSymbolTable(Vector<UnixAoutSymbolTableEntry> symTab) {
+	/**
+	 * Processes the binary's symbol table, taking one of four different actions depending on the
+	 * symbol type:
+	 *  - N_TEXT are added to a list for disassembly later.
+	 *  - N_DATA are labeled immediately.
+	 *  - N_BSS are added to a list for labeling after the .bss section size has been established.
+	 *  - N_UNDF are added to a list for address assignment and labeling in .bss if the symbol is
+	 *    not found to already exist in a global symbol table (i.e. provided by another binary.)
+	 */
+	protected void processSymbolTable(Vector<UnixAoutSymbolTableEntry> symTab) {
 
 		this.bssSymbols = new Hashtable<String, Long>();
 		this.possibleBssSymbols = new Hashtable<String, Long>();
@@ -260,13 +260,13 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 						}
 					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_DATA) {
 						this.api.createLabel(this.dataAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
-              this.namespace, true, SourceType.IMPORTED);
+											 this.namespace, true, SourceType.IMPORTED);
 
 					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_BSS) {
 						// Save the symbols that are explicitly identified as being in .bss
-            // to a list so that they can be labeled later (after we actually
-            // create the .bss block, which must wait until after we total all
-            // the space used by N_UNDF symbols; see below.)
+						// to a list so that they can be labeled later (after we actually
+						// create the .bss block, which must wait until after we total all
+						// the space used by N_UNDF symbols; see below.)
 						this.bssSymbols.put(symTabEntry.name, symTabEntry.value);
 
 					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_UNDF) {
@@ -282,13 +282,13 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				e.printStackTrace();
 			}
 		}
-  }
+	}
 
-  /**
-   * Processes the text relocation table by fixing addresses based on the true location of each
-   * symbol.
-   */
-  protected void processTextRelocation() {
+	/**
+	 * Processes the text relocation table by fixing addresses based on the true location of each
+	 * symbol.
+	 */
+	protected void processTextRelocation() {
 		for (Integer i = 0; i < this.textRelocTab.size(); i++) {
 
 			UnixAoutRelocationTableEntry relocationEntry = this.textRelocTab.elementAt(i);
@@ -297,7 +297,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				UnixAoutSymbolTableEntry symbolEntry = this.symTab.elementAt((int) relocationEntry.symbolNum);
 				AddressSpace addrSpace = this.textBlock.getStart().getAddressSpace();
 				Address relocAddr =
-          addrSpace.getAddress(relocationEntry.address + this.header.getTextAddr());
+					addrSpace.getAddress(relocationEntry.address + this.header.getTextAddr());
 
 				// If this symbol's N_EXT flag is clear, then we didn't mark it as a function when
 				// we were processing the symbol table (above). This is because special symbols like
@@ -313,33 +313,33 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				if (relocationEntry.extern && this.textBlock.contains(relocAddr)) {
 
 					List<Function> funcs =
-            this.api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
+						this.api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
 					List<Symbol> symbolsGlobal = this.api.getSymbols(symbolEntry.name, null);
 					List<Symbol> symbolsLocal = this.api.getSymbols(symbolEntry.name, namespace);
 
 					if (funcs.size() > 0) {
 						Address funcAddr = funcs.get(0).getEntryPoint();
 						fixAddress(this.textBlock, relocAddr, funcAddr, relocationEntry.pcRelativeAddressing,
-              this.bigEndian, relocationEntry.pointerLength);
+								   this.bigEndian, relocationEntry.pointerLength);
 
 					} else if (symbolsGlobal.size() > 0) {
 						Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
 						fixAddress(this.textBlock, relocAddr, globalSymbolAddr, relocationEntry.pcRelativeAddressing,
-							this.bigEndian, relocationEntry.pointerLength);
+								   this.bigEndian, relocationEntry.pointerLength);
 
 					} else if (symbolsLocal.size() > 0) {
 						Address localSymbolAddr = symbolsLocal.get(0).getAddress();
 						fixAddress(this.textBlock, relocAddr, localSymbolAddr, relocationEntry.pcRelativeAddressing,
-							this.bigEndian, relocationEntry.pointerLength);
+								   this.bigEndian, relocationEntry.pointerLength);
 
 					} else if (this.possibleBssSymbols.containsKey(symbolEntry.name)) {
 						try {
 							Address bssSymbolAddress = this.bssBlock.getStart().getAddressSpace().getAddress(bssLocation);
 							long bssSymbolSize = this.possibleBssSymbols.get(symbolEntry.name);
 							this.api.createLabel(bssSymbolAddress, symbolEntry.name, this.namespace, true,
-                SourceType.IMPORTED);
+												 SourceType.IMPORTED);
 							fixAddress(this.textBlock, relocAddr, bssSymbolAddress, relocationEntry.pcRelativeAddressing,
-									this.bigEndian, relocationEntry.pointerLength);
+									   this.bigEndian, relocationEntry.pointerLength);
 							this.program.getReferenceManager().addMemoryReference(relocAddr, bssSymbolAddress, RefType.DATA,
 									SourceType.IMPORTED, 0);
 							this.bssLocation += bssSymbolSize;
@@ -349,21 +349,21 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 						}
 					} else {
 						this.log.appendMsg("Symbol '" + symbolEntry.name
-								+ "' was not found and was not a candidate for allocation in .bss.");
+										   + "' was not found and was not a candidate for allocation in .bss.");
 					}
 				}
 			} else {
-				this.log.appendMsg("Symbol number " + relocationEntry.symbolNum + " is beyond symbol table length of "
-						+ symTab.size());
+				this.log.appendMsg("Symbol number " + relocationEntry.symbolNum +
+								   " is beyond symbol table length of " + symTab.size());
 			}
 		}
-  }
+	}
 
-  /**
-   * Processes the data relocation table by fixing addresses based on the true location of each
-   * symbol.
-   */
-  protected void processDataRelocation(long dataAddrFromHeader) {
+	/**
+	 * Processes the data relocation table by fixing addresses based on the true location of each
+	 * symbol.
+	 */
+	protected void processDataRelocation(long dataAddrFromHeader) {
 		for (Integer i = 0; i < this.dataRelocTab.size(); i++) {
 
 			UnixAoutRelocationTableEntry relocationEntry = this.dataRelocTab.elementAt(i);
@@ -376,35 +376,35 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				if (this.dataBlock.contains(relocAddr)) {
 
 					List<Function> funcs =
-            this.api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
+						this.api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
 					List<Symbol> symbolsGlobal = this.api.getSymbols(symbolEntry.name, null);
 					List<Symbol> symbolsLocal = this.api.getSymbols(symbolEntry.name, namespace);
 
 					if (funcs.size() > 0) {
 						Address funcAddr = funcs.get(0).getEntryPoint();
 						fixAddress(this.dataBlock, relocAddr, funcAddr, relocationEntry.pcRelativeAddressing,
-              this.bigEndian, relocationEntry.pointerLength);
+								   this.bigEndian, relocationEntry.pointerLength);
 
 					} else if (symbolsGlobal.size() > 0) {
 						Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
 						fixAddress(this.dataBlock, relocAddr, globalSymbolAddr,
-              relocationEntry.pcRelativeAddressing, this.bigEndian, relocationEntry.pointerLength);
+								   relocationEntry.pcRelativeAddressing, this.bigEndian, relocationEntry.pointerLength);
 
 					} else if (symbolsLocal.size() > 0) {
 						Address localSymbolAddr = symbolsLocal.get(0).getAddress();
 						fixAddress(this.dataBlock, relocAddr, localSymbolAddr,
-              relocationEntry.pcRelativeAddressing, this.bigEndian, relocationEntry.pointerLength);
+								   relocationEntry.pcRelativeAddressing, this.bigEndian, relocationEntry.pointerLength);
 
 					} else if (this.possibleBssSymbols.containsKey(symbolEntry.name)) {
 						try {
 							Address bssSymbolAddress =
-                this.bssBlock.getStart().getAddressSpace().getAddress(bssLocation);
+								this.bssBlock.getStart().getAddressSpace().getAddress(bssLocation);
 							this.api.createLabel(bssSymbolAddress, symbolEntry.name, namespace, true,
-                SourceType.IMPORTED);
+												 SourceType.IMPORTED);
 							fixAddress(this.dataBlock, relocAddr, bssSymbolAddress,
-                relocationEntry.pcRelativeAddressing, this.bigEndian, relocationEntry.pointerLength);
+									   relocationEntry.pcRelativeAddressing, this.bigEndian, relocationEntry.pointerLength);
 							this.program.getReferenceManager().addMemoryReference(relocAddr, bssSymbolAddress,
-                RefType.DATA, SourceType.IMPORTED, 0);
+									RefType.DATA, SourceType.IMPORTED, 0);
 							this.bssLocation += this.possibleBssSymbols.get(symbolEntry.name);
 
 						} catch (Exception e) {
@@ -412,21 +412,21 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 						}
 					} else {
 						this.log.appendMsg("Symbol '" + symbolEntry.name
-								+ "' was not found and was not a candidate for allocation in .bss.");
+										   + "' was not found and was not a candidate for allocation in .bss.");
 					}
 				}
 			} else {
 				this.log.appendMsg("Symbol number " + relocationEntry.symbolNum +
-          " is beyond symbol table length of " + symTab.size());
+								   " is beyond symbol table length of " + symTab.size());
 			}
 		}
-  }
+	}
 
-  /**
-   * Walks through the table of local function addresses, marks the locations as functions, and
-   * starts disassembly of those routines.
-   */
-  protected void disassembleKnownFuncs() {
+	/**
+	 * Walks through the table of local function addresses, marks the locations as functions, and
+	 * starts disassembly of those routines.
+	 */
+	protected void disassembleKnownFuncs() {
 		// Now that all relocation addresses have been rewritten, it's safe to start disassembly
 		// at all the known function entry points.
 		for (Address funcAddr : this.localFunctions.keySet()) {
@@ -438,18 +438,18 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				&& (this.header.getExecutableType() != UnixAoutHeader.ExecutableType.CMAGIC)) {
 			this.api.disassemble(textAddrSpace.getAddress(this.header.getEntryPoint()));
 		}
-  }
+	}
 
 	@Override
 	protected void load(ByteProvider provider, LoadSpec loadSpec, List<Option> options, Program program,
-			TaskMonitor monitor, MessageLog log) throws CancelledException, IOException {
+						TaskMonitor monitor, MessageLog log) throws CancelledException, IOException {
 
 		this.bigEndian = program.getLanguage().isBigEndian();
-    this.program = program;
-    this.log = log;
+		this.program = program;
+		this.log = log;
 		this.api = new FlatProgramAPI(program, monitor);
 		this.header = new UnixAoutHeader(provider, !this.bigEndian);
-    this.filename = provider.getFile().getName();
+		this.filename = provider.getFile().getName();
 		this.isOverlay = (header.getExecutableType() == ExecutableType.OMAGIC);
 
 		try {
@@ -458,32 +458,32 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			e1.printStackTrace();
 		}
 
-    createTextSection(
-      provider, monitor, header.getTextSize(), header.getTextAddr(), header.getTextOffset());
-    createDataSection(
-      provider, monitor, header.getDataSize(), header.getDataAddr(), header.getDataOffset());
+		createTextSection(
+			provider, monitor, header.getTextSize(), header.getTextAddr(), header.getTextOffset());
+		createDataSection(
+			provider, monitor, header.getDataSize(), header.getDataAddr(), header.getDataOffset());
 
 		BinaryReader reader = new BinaryReader(provider, !this.bigEndian);
 
 		this.symTab =
-      getSymbolTable(reader, header.getSymOffset(), header.getSymSize(), header.getStrOffset());
+			getSymbolTable(reader, header.getSymOffset(), header.getSymSize(), header.getStrOffset());
 		this.textRelocTab =
-      getRelocationTable(reader, header.getTextRelocOffset(), header.getTextRelocSize());
+			getRelocationTable(reader, header.getTextRelocOffset(), header.getTextRelocSize());
 		this.dataRelocTab =
-      getRelocationTable(reader, header.getDataRelocOffset(), header.getDataRelocSize());
+			getRelocationTable(reader, header.getDataRelocOffset(), header.getDataRelocSize());
 
-    processSymbolTable(symTab);
+		processSymbolTable(symTab);
 		createBssSection(header.getBssSize());
-    placeBssSymbols();
-    processTextRelocation();
-    processDataRelocation(header.getDataAddr());
-    disassembleKnownFuncs();
+		placeBssSymbols();
+		processTextRelocation();
+		processDataRelocation(header.getDataAddr());
+		disassembleKnownFuncs();
 	}
 
 	/**
 	 * Rewrites the pointer at the specified location to instead point to the
 	 * provided address.
-	 * 
+	 *
 	 * @param block           Memory block containing the pointer to be rewritten.
 	 * @param pointerLocation Address at which the pointer to be rewritten is.
 	 * @param newAddress      Address that will be the new pointer target.
@@ -496,11 +496,11 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	 *                        the pointer) is big endian. False if little endian.
 	 * @param pointerSize     1, 2, and 4-byte pointers are supported.
 	 */
-	private void fixAddress(MemoryBlock block, Address pointerLocation, Address newAddress, boolean isPcRelative,
-			boolean isBigEndian, int pointerSize) {
+	private void fixAddress(MemoryBlock block, Address pointerLocation, Address newAddress,
+							boolean isPcRelative, boolean isBigEndian, int pointerSize) {
 
 		final long value = isPcRelative ? (newAddress.getOffset() - pointerLocation.getOffset())
-				: newAddress.getOffset();
+						   : newAddress.getOffset();
 
 		byte[] valueBytes = new byte[pointerSize];
 
@@ -518,13 +518,14 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	/**
 	 * Reads a single relocation table for either text or data relocations,
 	 * depending on the offset/length provided.
-	 * 
+	 *
 	 * @param reader Source of file data
 	 * @param offset File byte offset to the start of the relocation table
 	 * @param len    Length of the relocation table in bytes
 	 * @return Vector of relocation table entries
 	 */
-	private Vector<UnixAoutRelocationTableEntry> getRelocationTable(BinaryReader reader, long offset, long len) {
+	private Vector<UnixAoutRelocationTableEntry> getRelocationTable(BinaryReader reader, long offset,
+			long len) {
 		Vector<UnixAoutRelocationTableEntry> relocTable = new Vector<UnixAoutRelocationTableEntry>();
 		reader.setPointerIndex(offset);
 
@@ -544,7 +545,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	/**
 	 * Reads all the symbol table entries from the file, returning their
 	 * representation.
-	 * 
+	 *
 	 * @param reader           Source of file data
 	 * @param offset           File byte offset to the start of the symbol table
 	 * @param len              Length of the symbol table in bytes
