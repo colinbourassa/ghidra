@@ -26,7 +26,7 @@ import ghidra.app.util.bin.ByteProvider;
 import ghidra.app.util.bin.format.unixaout.UnixAoutHeader;
 import ghidra.app.util.bin.format.unixaout.UnixAoutHeader.ExecutableType;
 import ghidra.app.util.bin.format.unixaout.UnixAoutRelocation;
-import ghidra.app.util.bin.format.unixaout.UnixAoutSymbolTableEntry;
+import ghidra.app.util.bin.format.unixaout.UnixAoutSymbol;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.framework.model.DomainObject;
 import ghidra.framework.store.LockException;
@@ -73,7 +73,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	private Hashtable<String, Long> bssSymbols;
 	private Hashtable<String, Long> possibleBssSymbols;
 	private Namespace namespace;
-	private Vector<UnixAoutSymbolTableEntry> symTab;
+	private Vector<UnixAoutSymbol> symTab;
 	private Vector<UnixAoutRelocation> textRelocTab;
 	private Vector<UnixAoutRelocation> dataRelocTab;
 	private Hashtable<Address, String> localFunctions = new Hashtable<Address, String>();
@@ -347,27 +347,27 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		// Process the symbol table by applying labels to identify any symbols whose
 		// addresses are given
 		for (Integer i = 0; i < this.symTab.size(); i++) {
-			UnixAoutSymbolTableEntry symTabEntry = this.symTab.elementAt(i);
+			UnixAoutSymbol symTabEntry = this.symTab.elementAt(i);
 			try {
-				if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_TEXT) {
+				if (symTabEntry.type == UnixAoutSymbol.SymbolType.N_TEXT) {
 					if (symTabEntry.isExt) {
 						// Save the entry point to this function in a list. Disassembly should
 						// wait until after we've processed the relocation tables.
 						Address funcAddr = this.textAddrSpace.getAddress(symTabEntry.value);
 						this.localFunctions.put(funcAddr, symTabEntry.name);
 					}
-				} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_DATA) {
+				} else if (symTabEntry.type == UnixAoutSymbol.SymbolType.N_DATA) {
 					this.api.createLabel(this.dataAddrSpace.getAddress(symTabEntry.value),
 							symTabEntry.name, this.namespace, true, SourceType.IMPORTED);
 
-				} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_BSS) {
+				} else if (symTabEntry.type == UnixAoutSymbol.SymbolType.N_BSS) {
 					// Save the symbols that are explicitly identified as being in .bss
 					// to a list so that they can be labeled later (after we actually
 					// create the .bss block, which must wait until after we total all
 					// the space used by N_UNDF symbols; see below.)
 					this.bssSymbols.put(symTabEntry.name, symTabEntry.value);
 
-				} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_UNDF) {
+				} else if (symTabEntry.type == UnixAoutSymbol.SymbolType.N_UNDF) {
 					// This is a special case given by the A.out spec: if the linker cannot find
 					// this symbol in any of the other binary files, then the fact that it is
 					// marked as N_UNDF but has a non-zero value means that its value should be
@@ -393,7 +393,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			UnixAoutRelocation relocationEntry = this.textRelocTab.elementAt(i);
 			if (relocationEntry.symbolNum < symTab.size()) {
 
-				UnixAoutSymbolTableEntry symbolEntry = this.symTab.elementAt((int) relocationEntry.symbolNum);
+				UnixAoutSymbol symbolEntry = this.symTab.elementAt((int) relocationEntry.symbolNum);
 				AddressSpace addrSpace = this.textBlock.getStart().getAddressSpace();
 				Address relocAddr = addrSpace.getAddress(relocationEntry.address + this.header.getTextAddr());
 
@@ -477,7 +477,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			UnixAoutRelocation relocationEntry = this.dataRelocTab.elementAt(i);
 			if (relocationEntry.symbolNum < symTab.size()) {
 
-				UnixAoutSymbolTableEntry symbolEntry = this.symTab.elementAt((int) relocationEntry.symbolNum);
+				UnixAoutSymbol symbolEntry = this.symTab.elementAt((int) relocationEntry.symbolNum);
 				AddressSpace addrSpace = this.dataBlock.getStart().getAddressSpace();
 				Address relocAddr = addrSpace.getAddress(relocationEntry.address + this.header.getDataAddr());
 
@@ -675,9 +675,9 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	 *                         (containing symbol names)
 	 * @return Vector of symbol table entries
 	 */
-	private Vector<UnixAoutSymbolTableEntry> getSymbolTable(BinaryReader reader, long offset,
+	private Vector<UnixAoutSymbol> getSymbolTable(BinaryReader reader, long offset,
 			long len, long strTabBaseOffset) {
-		Vector<UnixAoutSymbolTableEntry> symtab = new Vector<UnixAoutSymbolTableEntry>();
+		Vector<UnixAoutSymbol> symtab = new Vector<UnixAoutSymbol>();
 		reader.setPointerIndex(offset);
 
 		try {
@@ -689,7 +689,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				short desc = reader.readNextShort();
 				long value = reader.readNextUnsignedInt();
 				symtab.add(
-						new UnixAoutSymbolTableEntry(strOffset, typeByte, otherByte, desc, value));
+						new UnixAoutSymbol(strOffset, typeByte, otherByte, desc, value));
 			}
 
 			// lookup and set each string table symbol name
