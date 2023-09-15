@@ -21,44 +21,44 @@ package ghidra.app.util.bin.format.unixaout;
  * by the UNIX a.out executable.
  */
 public class UnixAoutRelocationTableEntry {
-    public long address;
-    public long symbolNum;
-    public boolean pcRelativeAddressing;
-    public byte pointerLength;
-    public boolean extern;
-    public boolean baseRelative;
-    public boolean jmpTable;
-    public boolean relative;
-    public boolean copy;
+	public long address;
+	public long symbolNum;
+	public boolean pcRelativeAddressing;
+	public byte pointerLength;
+	public boolean extern;
+	public boolean baseRelative;
+	public boolean jmpTable;
+	public boolean relative;
+	public boolean copy;
 
-    /**
-     * 
-     * @param address First of the two words in the table entry (a 32-bit address)
-     * @param flags   Second of the two words in the table entry (containing several
-     *                bitfields)
-     */
-    public UnixAoutRelocationTableEntry(long address, long flags, boolean bigEndian) {
-        this.address = (0xFFFFFFFF & address);
+	/**
+	 * 
+	 * @param address First of the two words in the table entry (a 32-bit address)
+	 * @param flags   Second of the two words in the table entry (containing several
+	 *                bitfields)
+	 */
+	public UnixAoutRelocationTableEntry(long address, long flags, boolean bigEndian) {
+		this.address = (0xFFFFFFFF & address);
 
-        if (bigEndian) {
-            this.symbolNum = ((flags & 0xFFFFFF00) >> 8);
-            this.pcRelativeAddressing = ((flags & 0x80) != 0);
-            this.pointerLength = (byte) (1 << ((flags & 0x60) >> 5));
-            this.extern = ((flags & 0x10) != 0);
-            this.baseRelative = ((flags & 0x8) != 0);
-            this.jmpTable = ((flags & 0x4) != 0);
-            this.relative = ((flags & 0x2) != 0);
-            this.copy = ((flags & 0x1) != 0);
-        } else {
-            this.symbolNum = (flags & 0x00FFFFFF);
-            final byte hibyte = (byte) ((flags & 0xFF000000) >> 24);
-            this.pcRelativeAddressing = ((hibyte & 0x01) != 0);
-            this.pointerLength = (byte) (1 << ((hibyte & 0x06) >> 1));
-            this.extern = ((hibyte & 0x08) != 0);
-            this.baseRelative = ((hibyte & 0x10) != 0);
-            this.jmpTable = ((hibyte & 0x20) != 0);
-            this.relative = ((hibyte & 0x40) != 0);
-            this.copy = ((hibyte & 0x80) != 0);
-        }
-    }
+		if (bigEndian) {
+			this.symbolNum = ((flags & 0xFFFFFF00) >> 8);
+			this.pcRelativeAddressing = ((flags & 0x80) != 0);
+			this.pointerLength = (byte) (1 << ((flags & 0x60) >> 5));
+			this.extern = ((flags & 0x10) != 0);
+			this.baseRelative = ((flags & 0x8) != 0);
+			this.jmpTable = ((flags & 0x4) != 0);
+			this.relative = ((flags & 0x2) != 0);
+			this.copy = ((flags & 0x1) != 0);
+		} else {
+			this.symbolNum = (flags & 0x00FFFFFF);
+			final byte hibyte = (byte) ((flags & 0xFF000000) >> 24);
+			this.pcRelativeAddressing = ((hibyte & 0x01) != 0);
+			this.pointerLength = (byte) (1 << ((hibyte & 0x06) >> 1));
+			this.extern = ((hibyte & 0x08) != 0);
+			this.baseRelative = ((hibyte & 0x10) != 0);
+			this.jmpTable = ((hibyte & 0x20) != 0);
+			this.relative = ((hibyte & 0x40) != 0);
+			this.copy = ((hibyte & 0x80) != 0);
+		}
+	}
 }
