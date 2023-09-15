@@ -25,7 +25,7 @@ import ghidra.app.util.bin.BinaryReader;
 import ghidra.app.util.bin.ByteProvider;
 import ghidra.app.util.bin.format.unixaout.UnixAoutHeader;
 import ghidra.app.util.bin.format.unixaout.UnixAoutHeader.ExecutableType;
-import ghidra.app.util.bin.format.unixaout.UnixAoutRelocationTableEntry;
+import ghidra.app.util.bin.format.unixaout.UnixAoutRelocation;
 import ghidra.app.util.bin.format.unixaout.UnixAoutSymbolTableEntry;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.framework.model.DomainObject;
@@ -74,8 +74,8 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	private Hashtable<String, Long> possibleBssSymbols;
 	private Namespace namespace;
 	private Vector<UnixAoutSymbolTableEntry> symTab;
-	private Vector<UnixAoutRelocationTableEntry> textRelocTab;
-	private Vector<UnixAoutRelocationTableEntry> dataRelocTab;
+	private Vector<UnixAoutRelocation> textRelocTab;
+	private Vector<UnixAoutRelocation> dataRelocTab;
 	private Hashtable<Address, String> localFunctions = new Hashtable<Address, String>();
 	private long bssLocation = 0;
 	private FlatProgramAPI api;
@@ -390,7 +390,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	protected void processTextRelocation() {
 		for (Integer i = 0; i < this.textRelocTab.size(); i++) {
 
-			UnixAoutRelocationTableEntry relocationEntry = this.textRelocTab.elementAt(i);
+			UnixAoutRelocation relocationEntry = this.textRelocTab.elementAt(i);
 			if (relocationEntry.symbolNum < symTab.size()) {
 
 				UnixAoutSymbolTableEntry symbolEntry = this.symTab.elementAt((int) relocationEntry.symbolNum);
@@ -474,7 +474,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	protected void processDataRelocation() {
 		for (Integer i = 0; i < this.dataRelocTab.size(); i++) {
 
-			UnixAoutRelocationTableEntry relocationEntry = this.dataRelocTab.elementAt(i);
+			UnixAoutRelocation relocationEntry = this.dataRelocTab.elementAt(i);
 			if (relocationEntry.symbolNum < symTab.size()) {
 
 				UnixAoutSymbolTableEntry symbolEntry = this.symTab.elementAt((int) relocationEntry.symbolNum);
@@ -645,9 +645,9 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	 * @param len    Length of the relocation table in bytes
 	 * @return Vector of relocation table entries
 	 */
-	private Vector<UnixAoutRelocationTableEntry> getRelocationTable(BinaryReader reader,
+	private Vector<UnixAoutRelocation> getRelocationTable(BinaryReader reader,
 			long offset, long len) {
-		Vector<UnixAoutRelocationTableEntry> relocTable = new Vector<UnixAoutRelocationTableEntry>();
+		Vector<UnixAoutRelocation> relocTable = new Vector<UnixAoutRelocation>();
 		reader.setPointerIndex(offset);
 
 		try {
@@ -655,7 +655,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				long address = reader.readNextUnsignedInt();
 				long flags = reader.readNextUnsignedInt();
 				relocTable.add(
-						new UnixAoutRelocationTableEntry(address, flags, reader.isBigEndian()));
+						new UnixAoutRelocation(address, flags, reader.isBigEndian()));
 			}
 		} catch (IOException e) {
 			e.printStackTrace();
