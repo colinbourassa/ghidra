@@ -20,15 +20,27 @@ import java.io.IOException;
 
 import ghidra.app.util.bin.BinaryReader;
 import ghidra.app.util.bin.ByteProvider;
+import ghidra.app.util.bin.StructConverter;
+import ghidra.program.model.address.Address;
+import ghidra.program.model.data.CategoryPath;
+import ghidra.program.model.data.DataType;
+import ghidra.program.model.data.Structure;
+import ghidra.program.model.data.StructureDataType;
+import ghidra.program.model.listing.Listing;
+import ghidra.program.model.listing.Program;
+import ghidra.program.model.util.CodeUnitInsertionException;
+import ghidra.util.exception.DuplicateNameException;
 
-public class UnixAoutHeader {
+public class UnixAoutHeader implements StructConverter {
 
-	public enum ExecutableType {
+	public enum AoutType {
 		OMAGIC, NMAGIC, ZMAGIC, QMAGIC, CMAGIC, UNKNOWN
 	}
 
+	private BinaryReader reader;
+
 	private long binarySize;
-	private ExecutableType exeType;
+	private AoutType exeType;
 	private boolean machineTypeValid;
 	private String languageSpec;
 	private String compilerSpec = "default";
@@ -45,6 +57,8 @@ public class UnixAoutHeader {
 	private long a_entry;
 	private long a_trsize;
 	private long a_drsize;
+
+	private long strSize;
 
 	private long txtOffset;
 	private long datOffset;
@@ -77,7 +91,7 @@ public class UnixAoutHeader {
 	 * @throws IOException
 	 */
 	public UnixAoutHeader(ByteProvider provider, boolean isLittleEndian) throws IOException {
-		BinaryReader reader = new BinaryReader(provider, isLittleEndian);
+		this.reader = new BinaryReader(provider, isLittleEndian);
 
 		this.a_magic = reader.readNextUnsignedInt();
 		this.a_text = reader.readNextUnsignedInt();
@@ -95,7 +109,7 @@ public class UnixAoutHeader {
 		// word
 		// is written in big-endian regardless of the data endianness in the rest of the
 		// file.
-		if ((this.exeType == ExecutableType.UNKNOWN) && isLittleEndian) {
+		if ((this.exeType == AoutType.UNKNOWN) && isLittleEndian) {
 			this.a_magic = Integer.reverseBytes((int) this.a_magic);
 			checkExecutableType();
 		}
@@ -109,10 +123,19 @@ public class UnixAoutHeader {
 		this.symOffset = this.datRelOffset + this.a_drsize;
 		this.strOffset = this.symOffset + this.a_syms;
 
+		this.strSize = 0;
+		if (this.strOffset != 0 && (this.strOffset + 4) <= binarySize) {
+			this.strSize = reader.readUnsignedInt(this.strOffset);
+		}
+
 		determineTextAddr();
 		this.txtEndAddr = this.txtAddr + this.a_text;
-		this.datAddr = (this.exeType == ExecutableType.OMAGIC) ? this.txtEndAddr : segmentRound(this.txtEndAddr);
+		this.datAddr = (this.exeType == AoutType.OMAGIC) ? this.txtEndAddr : segmentRound(this.txtEndAddr);
 		this.bssAddr = this.datAddr + this.a_data;
+	}
+
+	public BinaryReader getReader() {
+		return this.reader;
 	}
 
 	/**
@@ -133,7 +156,7 @@ public class UnixAoutHeader {
 	/**
 	 * Returns the enumerated type of executable contained in this A.out file.
 	 */
-	public ExecutableType getExecutableType() {
+	public AoutType getExecutableType() {
 		return this.exeType;
 	}
 
@@ -143,7 +166,7 @@ public class UnixAoutHeader {
 	 */
 	public boolean isValid() {
 		return isMachineTypeValid() &&
-				(this.exeType != ExecutableType.UNKNOWN) &&
+				(this.exeType != AoutType.UNKNOWN) &&
 				areOffsetsValid();
 	}
 
@@ -161,6 +184,10 @@ public class UnixAoutHeader {
 
 	public long getSymSize() {
 		return this.a_syms;
+	}
+
+	public long getStrSize() {
+		return this.strSize;
 	}
 
 	public long getEntryPoint() {
@@ -406,22 +433,22 @@ public class UnixAoutHeader {
 
 		switch (exetypeMagic) {
 			case 0x111: // 0421: core file
-				this.exeType = ExecutableType.CMAGIC;
+				this.exeType = AoutType.CMAGIC;
 				break;
 			case 0x108: // 0410: pure executable
-				this.exeType = ExecutableType.NMAGIC;
+				this.exeType = AoutType.NMAGIC;
 				break;
 			case 0x107: // 0407: object file or impure executable
-				this.exeType = ExecutableType.OMAGIC;
+				this.exeType = AoutType.OMAGIC;
 				break;
 			case 0x0CC: // 0314: demand-paged exe w/ header in .text
-				this.exeType = ExecutableType.QMAGIC;
+				this.exeType = AoutType.QMAGIC;
 				break;
 			case 0x10B: // 0413: demand-paged executable
-				this.exeType = ExecutableType.ZMAGIC;
+				this.exeType = AoutType.ZMAGIC;
 				break;
 			default:
-				this.exeType = ExecutableType.UNKNOWN;
+				this.exeType = AoutType.UNKNOWN;
 		}
 	}
 
@@ -465,12 +492,12 @@ public class UnixAoutHeader {
 			}
 		}
 
-		if (isLinuxStyle && (this.exeType == ExecutableType.ZMAGIC)) {
+		if (isLinuxStyle && (this.exeType == AoutType.ZMAGIC)) {
 			// Linux ZMAGICs don't start the .text content until 0x400
 			this.txtOffset = sizeOfLongExecHeader;
 
-		} else if ((this.exeType == ExecutableType.QMAGIC) ||
-				(this.exeType == ExecutableType.ZMAGIC)) {
+		} else if ((this.exeType == AoutType.QMAGIC) ||
+				(this.exeType == AoutType.ZMAGIC)) {
 			// ZMAGIC for other platforms (as well as QMAGIC) include the file header itself
 			// in the .text content
 			this.txtOffset = 0;
@@ -488,9 +515,9 @@ public class UnixAoutHeader {
 	 */
 	private void determineTextAddr() {
 
-		if ((this.isSparc && (this.exeType == ExecutableType.NMAGIC)) ||
+		if ((this.isSparc && (this.exeType == AoutType.NMAGIC)) ||
 				(this.isNetBSD) ||
-				(this.exeType == ExecutableType.QMAGIC)) {
+				(this.exeType == AoutType.QMAGIC)) {
 			this.txtAddr = this.pageSize;
 
 		} else {
@@ -522,5 +549,26 @@ public class UnixAoutHeader {
 		final long mask = this.pageSize - 1;
 		long rounded = ((addr + mask) & ~mask);
 		return rounded;
+	}
+
+	@Override
+	public DataType toDataType() throws DuplicateNameException, IOException {
+		String dtName = "exec";
+		Structure struct = new StructureDataType(new CategoryPath("/AOUT"), dtName, 0);
+		struct.add(DWORD, "a_midmag", null);
+		struct.add(DWORD, "a_text", null);
+		struct.add(DWORD, "a_data", null);
+		struct.add(DWORD, "a_bss", null);
+		struct.add(DWORD, "a_syms", null);
+		struct.add(DWORD, "a_entry", null);
+		struct.add(DWORD, "a_trsize", null);
+		struct.add(DWORD, "a_drsize", null);
+
+		return struct;
+	}
+
+	public void markup(Program program, Address headerAddress) throws CodeUnitInsertionException, DuplicateNameException, IOException {
+		Listing listing = program.getListing();
+		listing.createData(headerAddress, toDataType());
 	}
 }
