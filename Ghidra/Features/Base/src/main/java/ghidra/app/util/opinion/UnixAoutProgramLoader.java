@@ -213,7 +213,9 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 			if (externalSectionSize < EXTERNAL_BLOCK_MIN_SIZE) {
 				externalSectionSize = EXTERNAL_BLOCK_MIN_SIZE;
 			}
-			addUninitializedMemorySection(null, externalSectionSize, nextFreeAddress, MemoryBlock.EXTERNAL_BLOCK_NAME, false, false, false, "NOTE: This block is artificial and is used to make relocations work correctly", false);
+			addUninitializedMemorySection(null, externalSectionSize, nextFreeAddress, MemoryBlock.EXTERNAL_BLOCK_NAME,
+					false, false, false,
+					"NOTE: This block is artificial and is used to make relocations work correctly", false);
 		}
 		if (header.getStrSize() > 0) {
 			addInitializedMemorySection(null, header.getStrOffset(), header.getStrSize(), otherAddress, dot_strtab,
@@ -341,6 +343,7 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 
 		int idx = 0;
 		for (UnixAoutRelocation relocation : relTable) {
+			int type = ((int) relocation.flags) & 0xFF;
 			Address targetAddress = targetBlock.getStart().add(relocation.address);
 
 			byte originalBytes[] = new byte[relocation.pointerLength];
@@ -393,8 +396,8 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 								relocation.flags, targetAddress));
 			}
 
-			relocationTable.add(targetAddress, status, relocation.flags, new long[] { relocation.symbolNum },
-					originalBytes, relocation.getSymbolName(symtab));
+			relocationTable.add(targetAddress, status, type, new long[] { relocation.symbolNum }, originalBytes,
+					relocation.getSymbolName(symtab));
 			idx++;
 		}
 	}
