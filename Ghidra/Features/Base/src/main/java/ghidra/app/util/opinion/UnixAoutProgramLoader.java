@@ -22,9 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import ghidra.app.util.MemoryBlockUtils;
 import ghidra.app.util.bin.ByteProvider;
-import ghidra.app.util.bin.format.MemoryLoadable;
 import ghidra.app.util.bin.format.unixaout.UnixAoutHeader;
 import ghidra.app.util.bin.format.unixaout.UnixAoutRelocation;
 import ghidra.app.util.bin.format.unixaout.UnixAoutRelocationTable;
@@ -32,6 +30,7 @@ import ghidra.app.util.bin.format.unixaout.UnixAoutStringTable;
 import ghidra.app.util.bin.format.unixaout.UnixAoutSymbol;
 import ghidra.app.util.bin.format.unixaout.UnixAoutSymbolTable;
 import ghidra.app.util.importer.MessageLog;
+import ghidra.framework.store.LockException;
 import ghidra.program.database.function.OverlappingFunctionException;
 import ghidra.program.database.mem.FileBytes;
 import ghidra.program.model.address.Address;
@@ -43,6 +42,7 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.mem.MemoryBlock;
+import ghidra.program.model.mem.MemoryConflictException;
 import ghidra.program.model.reloc.Relocation.Status;
 import ghidra.program.model.reloc.RelocationTable;
 import ghidra.program.model.symbol.SourceType;
@@ -57,8 +57,9 @@ import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.InvalidInputException;
 import ghidra.util.task.TaskMonitor;
 
-public class UnixAoutProgramLoader extends MemorySectionResolver {
+public class UnixAoutProgramLoader {
 	private final static String BLOCK_SOURCE_NAME = "Unix Aout Loader";
+	private final static String EXTERNAL_BLOCK_COMMENT = "NOTE: This block is artificial and is used to make relocations work correctly";
 	private final int EXTERNAL_BLOCK_MIN_SIZE = 0x10000; // 64K
 
 	public final static String dot_text = ".text";
@@ -69,11 +70,26 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 	public final static String dot_strtab = ".strtab";
 	public final static String dot_symtab = ".symtab";
 
+	private final Program program;
 	private final TaskMonitor monitor;
 	private final MessageLog log;
 	private final UnixAoutHeader header;
 
+	private boolean prefixSectionNamesWithFileName;
+
 	private FileBytes fileBytes;
+
+	private MemoryBlock blockHeader;
+	private MemoryBlock blockText;
+	private MemoryBlock blockData;
+	private MemoryBlock blockBss;
+	private MemoryBlock blockExternal;
+	private MemoryBlock blockStrtab;
+	private MemoryBlock blockSymtab;
+	private MemoryBlock blockRelText;
+	private MemoryBlock blockRelData;
+
+	private Address nextExternalAddress;
 
 	private UnixAoutRelocationTable relText;
 	private UnixAoutRelocationTable relData;
@@ -85,29 +101,30 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 	private int undefinedSymbolCount = 0;
 
 	public UnixAoutProgramLoader(Program program, UnixAoutHeader header, TaskMonitor monitor, MessageLog log) {
-		super(program);
-
+		this.program = program;
 		this.monitor = monitor;
 		this.log = log;
 		this.header = header;
 	}
 
-	public void loadAout(long baseAddr) throws IOException, CancelledException {
+	public void loadAout(boolean prefixSectionNamesWithFileName) throws IOException, CancelledException {
+		this.prefixSectionNamesWithFileName = prefixSectionNamesWithFileName;
+
 		log.appendMsg(String.format("----- Loading %s -----", header.getReader().getByteProvider().getAbsolutePath()));
 		log.appendMsg(String.format("Found a.out type %s.", header.getExecutableType().name()));
 
-		ByteProvider byteProvider = header.getReader().getByteProvider();
+		final ByteProvider byteProvider = header.getReader().getByteProvider();
 
 		try {
 			buildTables(byteProvider);
 			preprocessSymbolTable();
-			loadSections(baseAddr, byteProvider);
+			loadSections(byteProvider);
 			loadSymbols();
-			applyRelocations(baseAddr, program.getMemory().getBlock(dot_text), relText);
-			applyRelocations(baseAddr, program.getMemory().getBlock(dot_data), relData);
+			applyRelocations(blockText, relText);
+			applyRelocations(blockData, relData);
 			markupSections();
 		} catch (AddressOverflowException | InvalidInputException | CodeUnitInsertionException | DuplicateNameException
-				| MemoryAccessException e) {
+				| MemoryAccessException | LockException | IllegalArgumentException | MemoryConflictException e) {
 			throw new RuntimeException(e);
 		}
 	}
@@ -169,8 +186,8 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 		}
 	}
 
-	private void loadSections(long baseAddr, ByteProvider byteProvider)
-			throws AddressOverflowException, IOException, CancelledException {
+	private void loadSections(ByteProvider byteProvider) throws AddressOverflowException, IOException,
+			CancelledException, LockException, IllegalArgumentException, MemoryConflictException {
 		monitor.setMessage("Loading FileBytes...");
 
 		try (InputStream fileIn = byteProvider.getInputStream(0);
@@ -181,58 +198,88 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 					monitor);
 		}
 
+		final Memory memory = program.getMemory();
+		final SymbolTable symbolTable = program.getSymbolTable();
 		final AddressSpace defaultAddressSpace = program.getAddressFactory().getDefaultAddressSpace();
 		final Address otherAddress = AddressSpace.OTHER_SPACE.getMinAddress();
 		Address address;
 		Address nextFreeAddress = defaultAddressSpace.getAddress(0);
 
 		if (header.getTextOffset() != 0 || header.getTextSize() < 32) {
-			addInitializedMemorySection(null, 0, 32, otherAddress, "_aoutHeader", false, false, false, null, false,
-					false);
+			blockHeader = memory.createInitializedBlock(getSectionName("_aoutHeader"), otherAddress, fileBytes, 0, 32,
+					true);
 		}
 		if (header.getTextSize() > 0) {
-			address = defaultAddressSpace.getAddress(baseAddr + header.getTextAddr());
+			address = defaultAddressSpace.getAddress(header.getTextAddr());
 			nextFreeAddress = address.add(header.getTextSize());
-			addInitializedMemorySection(null, header.getTextOffset(), header.getTextSize(), address, dot_text, true,
-					true, true, null, false, true);
+			blockText = memory.createInitializedBlock(getSectionName(dot_text), address, fileBytes,
+					header.getTextOffset(), header.getTextSize(), false);
+			blockText.setPermissions(true, true, true);
+			blockText.setSourceName(BLOCK_SOURCE_NAME);
 		}
 		if (header.getDataSize() > 0) {
-			address = defaultAddressSpace.getAddress(baseAddr + header.getDataAddr());
+			address = defaultAddressSpace.getAddress(header.getDataAddr());
 			nextFreeAddress = address.add(header.getDataSize());
-			addInitializedMemorySection(null, header.getDataOffset(), header.getDataSize(), address, dot_data, true,
-					true, false, null, false, true);
+			blockData = memory.createInitializedBlock(getSectionName(dot_data), address, fileBytes,
+					header.getDataOffset(), header.getDataSize(), false);
+			blockData.setPermissions(true, true, false);
+			blockData.setSourceName(BLOCK_SOURCE_NAME);
 		}
 		if ((header.getBssSize() + extraBssSize) > 0) {
-			address = defaultAddressSpace.getAddress(baseAddr + header.getBssAddr());
+			address = defaultAddressSpace.getAddress(header.getBssAddr());
 			nextFreeAddress = address.add(header.getBssSize() + extraBssSize);
-			addUninitializedMemorySection(null, header.getBssSize() + extraBssSize, address, dot_bss, true, true, false,
-					null, false);
+			blockBss = memory.createUninitializedBlock(getSectionName(dot_bss), address,
+					header.getBssSize() + extraBssSize, false);
+			blockBss.setPermissions(true, true, false);
+			blockBss.setSourceName(BLOCK_SOURCE_NAME);
 		}
 		if (undefinedSymbolCount > 0) {
-			int externalSectionSize = undefinedSymbolCount * 4;
-			if (externalSectionSize < EXTERNAL_BLOCK_MIN_SIZE) {
-				externalSectionSize = EXTERNAL_BLOCK_MIN_SIZE;
+			blockExternal = memory.getBlock(MemoryBlock.EXTERNAL_BLOCK_NAME);
+
+			if (blockExternal == null) {
+				int externalSectionSize = undefinedSymbolCount * 4;
+				if (externalSectionSize < EXTERNAL_BLOCK_MIN_SIZE) {
+					externalSectionSize = EXTERNAL_BLOCK_MIN_SIZE;
+				}
+				blockExternal = memory.createUninitializedBlock(MemoryBlock.EXTERNAL_BLOCK_NAME, nextFreeAddress,
+						externalSectionSize, true);
+				blockExternal.setComment(EXTERNAL_BLOCK_COMMENT);
+				blockExternal.setSourceName(BLOCK_SOURCE_NAME);
+				nextExternalAddress = blockExternal.getStart();
+			} else {
+				nextExternalAddress = blockExternal.getStart();
+
+				SymbolIterator it = symbolTable.getExternalSymbols();
+				while (it.hasNext()) {
+					Symbol externalSymbol = it.next();
+					Address externalSymbolAddress = externalSymbol.getAddress();
+
+					if (externalSymbolAddress.compareTo(nextExternalAddress) < 0) {
+						nextExternalAddress	= externalSymbolAddress.add(4);
+					}
+				}
 			}
-			addUninitializedMemorySection(null, externalSectionSize, nextFreeAddress, MemoryBlock.EXTERNAL_BLOCK_NAME, false, false, false, "NOTE: This block is artificial and is used to make relocations work correctly", false);
 		}
 		if (header.getStrSize() > 0) {
-			addInitializedMemorySection(null, header.getStrOffset(), header.getStrSize(), otherAddress, dot_strtab,
-					false, false, false, null, false, false);
+			blockStrtab = memory.createInitializedBlock(getSectionName(dot_strtab), otherAddress, fileBytes,
+					header.getStrOffset(), header.getStrSize(), true);
+			blockStrtab.setSourceName(BLOCK_SOURCE_NAME);
 		}
 		if (header.getSymSize() > 0) {
-			addInitializedMemorySection(null, header.getSymOffset(), header.getSymSize(), otherAddress, dot_symtab,
-					false, false, false, null, false, false);
+			blockSymtab = memory.createInitializedBlock(getSectionName(dot_symtab), otherAddress, fileBytes,
+					header.getSymOffset(), header.getSymSize(), true);
+			blockSymtab.setSourceName(BLOCK_SOURCE_NAME);
 		}
 		if (header.getTextRelocSize() > 0) {
-			addInitializedMemorySection(null, header.getTextRelocOffset(), header.getTextRelocSize(), otherAddress,
-					dot_rel_text, false, false, false, null, false, false);
+			blockRelText = memory.createInitializedBlock(getSectionName(dot_rel_text), otherAddress, fileBytes,
+					header.getTextRelocOffset(), header.getTextRelocSize(), true);
+			blockRelText.setSourceName(BLOCK_SOURCE_NAME);
 		}
 		if (header.getDataRelocSize() > 0) {
-			addInitializedMemorySection(null, header.getDataRelocOffset(), header.getDataRelocSize(), otherAddress,
-					dot_rel_data, false, false, false, null, false, false);
+			blockRelData = memory.createInitializedBlock(getSectionName(dot_rel_data), otherAddress, fileBytes,
+					header.getDataRelocOffset(), header.getDataRelocSize(), true);
+			blockRelData.setSourceName(BLOCK_SOURCE_NAME);
 		}
-
-		resolve(monitor);
 	}
 
 	private void loadSymbols() throws InvalidInputException {
@@ -242,15 +289,15 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 			return;
 		}
 
-		SymbolTable symbolTable = program.getSymbolTable();
-		FunctionManager functionManager = program.getFunctionManager();
-		MemoryBlock textBlock = program.getMemory().getBlock(dot_text);
-		MemoryBlock dataBlock = program.getMemory().getBlock(dot_data);
-		MemoryBlock bssBlock = program.getMemory().getBlock(dot_bss);
-		MemoryBlock externalBlock = program.getMemory().getBlock(MemoryBlock.EXTERNAL_BLOCK_NAME);
+		final SymbolTable symbolTable = program.getSymbolTable();
+		final FunctionManager functionManager = program.getFunctionManager();
+		final Memory memory = program.getMemory();
+		final MemoryBlock blockText = memory.getBlock(getSectionName(dot_text));
+		final MemoryBlock blockData = memory.getBlock(getSectionName(dot_data));
+		final MemoryBlock blockBss = memory.getBlock(getSectionName(dot_bss));
+		final MemoryBlock externalBlock = memory.getBlock(MemoryBlock.EXTERNAL_BLOCK_NAME);
 
 		int extraBssOffset = 0;
-		int undefinedSymbolIdx = 0;
 		List<String> aliases = new ArrayList<>();
 
 		for (UnixAoutSymbol symbol : symtab) {
@@ -259,26 +306,27 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 
 			switch (symbol.type) {
 				case N_TEXT:
-					address = textBlock != null ? textBlock.getStart().add(symbol.value) : null;
-					block = textBlock;
+					address = blockText != null ? blockText.getStart().add(symbol.value) : null;
+					block = blockText;
 					break;
 				case N_DATA:
-					address = dataBlock != null ? dataBlock.getStart().add(symbol.value) : null;
-					block = dataBlock;
+					address = blockData != null ? blockData.getStart().add(symbol.value) : null;
+					block = blockData;
 					break;
 				case N_BSS:
-					address = bssBlock != null ? bssBlock.getStart().add(symbol.value) : null;
-					block = bssBlock;
+					address = blockBss != null ? blockBss.getStart().add(symbol.value) : null;
+					block = blockBss;
 					break;
 				case N_UNDF:
 					if (symbol.value > 0) {
-						address = bssBlock.getEnd().add(extraBssOffset);
-						block = bssBlock;
+						address = blockBss.getEnd().add(extraBssOffset);
+						block = blockBss;
 						extraBssOffset += symbol.value;
 					} else {
-						address = externalBlock.getStart().add(undefinedSymbolIdx++ * 4);
+						address = nextExternalAddress;
 						block = externalBlock;
 						symbolTable.addExternalEntryPoint(address);
+						nextExternalAddress = nextExternalAddress.add(4);
 					}
 					break;
 				case N_INDR:
@@ -323,7 +371,7 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 		}
 	}
 
-	private void applyRelocations(long baseAddr, MemoryBlock targetBlock, UnixAoutRelocationTable relTable)
+	private void applyRelocations(MemoryBlock targetBlock, UnixAoutRelocationTable relTable)
 			throws MemoryAccessException {
 		if (targetBlock == null || relTable == null) {
 			return;
@@ -331,16 +379,13 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 
 		monitor.setMessage(String.format("Applying relocations for section %s...", targetBlock.getName()));
 
-		DataConverter dc = DataConverter.getInstance(program.getLanguage().isBigEndian());
-		SymbolTable symbolTable = program.getSymbolTable();
-		RelocationTable relocationTable = program.getRelocationTable();
-		Memory memory = program.getMemory();
-		MemoryBlock textBlock = memory.getBlock(dot_text);
-		MemoryBlock dataBlock = memory.getBlock(dot_data);
-		MemoryBlock bssBlock = memory.getBlock(dot_bss);
+		final DataConverter dc = DataConverter.getInstance(program.getLanguage().isBigEndian());
+		final SymbolTable symbolTable = program.getSymbolTable();
+		final RelocationTable relocationTable = program.getRelocationTable();
 
 		int idx = 0;
 		for (UnixAoutRelocation relocation : relTable) {
+			int type = ((int) relocation.flags) & 0xFF;
 			Address targetAddress = targetBlock.getStart().add(relocation.address);
 
 			byte originalBytes[] = new byte[relocation.pointerLength];
@@ -361,13 +406,13 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 				} else if (relocation.extern == false) {
 					switch (relocation.symbolNum) {
 						case 4:
-							value = textBlock.getStart().getOffset();
+							value = blockText.getStart().getOffset();
 							break;
 						case 6:
-							value = dataBlock.getStart().getOffset();
+							value = blockData.getStart().getOffset();
 							break;
 						case 8:
-							value = bssBlock.getStart().getOffset();
+							value = blockBss.getStart().getOffset();
 							break;
 					}
 				}
@@ -393,8 +438,8 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 								relocation.flags, targetAddress));
 			}
 
-			relocationTable.add(targetAddress, status, relocation.flags, new long[] { relocation.symbolNum },
-					originalBytes, relocation.getSymbolName(symtab));
+			relocationTable.add(targetAddress, status, type, new long[] { relocation.symbolNum }, originalBytes,
+					relocation.getSymbolName(symtab));
 			idx++;
 		}
 	}
@@ -409,12 +454,10 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 
 		// Markup header.
 		Address headerAddress = null;
-		MemoryBlock aoutHeader = program.getMemory().getBlock("_aoutHeader");
-		MemoryBlock textBlock = program.getMemory().getBlock(dot_text);
-		if (aoutHeader != null) {
-			headerAddress = aoutHeader.getStart();
-		} else if (textBlock != null && header.getTextOffset() == 0 && header.getTextSize() >= 32) {
-			headerAddress = textBlock.getStart();
+		if (blockHeader != null) {
+			headerAddress = blockHeader.getStart();
+		} else if (blockText != null && header.getTextOffset() == 0 && header.getTextSize() >= 32) {
+			headerAddress = blockText.getStart();
 		}
 		if (headerAddress != null) {
 			header.markup(program, headerAddress);
@@ -433,44 +476,41 @@ public class UnixAoutProgramLoader extends MemorySectionResolver {
 
 		monitor.setMessage("Marking up relocation tables...");
 
-		MemoryBlock relTextBlock = program.getMemory().getBlock(dot_rel_text);
-		if (relTextBlock != null) {
-			relText.markup(program, relTextBlock);
+		if (blockRelText != null) {
+			relText.markup(program, blockRelText);
 		}
 
-		MemoryBlock relDataBlock = program.getMemory().getBlock(dot_rel_data);
-		if (relDataBlock != null) {
-			relData.markup(program, relDataBlock);
+		if (blockRelData != null) {
+			relData.markup(program, blockRelData);
 		}
 
 		monitor.setMessage("Marking up symbol table...");
 
-		MemoryBlock symtabBlock = program.getMemory().getBlock(dot_symtab);
-		if (symtabBlock != null) {
-			symtab.markup(program, symtabBlock);
+		if (blockSymtab != null) {
+			symtab.markup(program, blockSymtab);
 		}
 
 		monitor.setMessage("Marking up string table...");
 
-		MemoryBlock strtabBlock = program.getMemory().getBlock(dot_strtab);
-		if (strtabBlock != null) {
-			strtab.markup(program, strtabBlock);
+		if (blockStrtab != null) {
+			strtab.markup(program, blockStrtab);
 		}
 	}
 
-	@Override
-	protected MemoryBlock createInitializedBlock(MemoryLoadable key, boolean isOverlay, String name, Address start,
-			long fileOffset, long length, String comment, boolean r, boolean w, boolean x, TaskMonitor monitor)
-			throws IOException, AddressOverflowException, CancelledException {
-		return MemoryBlockUtils.createInitializedBlock(program, isOverlay, name, start, fileBytes, fileOffset, length,
-				comment, BLOCK_SOURCE_NAME, r, w, x, log);
+	private String getSectionName(String section) {
+		if (prefixSectionNamesWithFileName) {
+			String fileName = header.getReader().getByteProvider().getFSRL().getName();
+			return fileName + ":" + section;
+		}
+
+		return section;
 	}
 
-	@Override
-	protected MemoryBlock createUninitializedBlock(MemoryLoadable key, boolean isOverlay, String name, Address start,
-			long length, String comment, boolean r, boolean w, boolean x)
-			throws IOException, AddressOverflowException, CancelledException {
-		return MemoryBlockUtils.createUninitializedBlock(program, isOverlay, name, start, length, comment, comment, r,
-				w, x, log);
+	public static boolean mustPrefixSectionNames(Program program) {
+		final Memory memory = program.getMemory();
+		return memory.getBlock(dot_text) != null || memory.getBlock(dot_data) != null
+				|| memory.getBlock(dot_bss) != null || memory.getBlock(dot_rel_text) != null
+				|| memory.getBlock(dot_rel_data) != null || memory.getBlock(dot_strtab) != null
+				|| memory.getBlock(dot_symtab) != null;
 	}
 }

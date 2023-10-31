@@ -22,6 +22,7 @@ import java.util.List;
 
 import ghidra.app.util.Option;
 import ghidra.app.util.OptionException;
+import ghidra.app.util.OptionUtils;
 import ghidra.app.util.bin.ByteProvider;
 import ghidra.app.util.bin.format.unixaout.UnixAoutHeader;
 import ghidra.app.util.importer.MessageLog;
@@ -48,10 +49,16 @@ import ghidra.util.task.TaskMonitor;
  */
 public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	public static final String OPTION_NAME_BASE_ADDR = "Base Address";
+	public static final String OPTION_PREFIX_SECTIONS_WITH_FILENAME = "Prefix section names with filename";
 
 	@Override
 	public String getName() {
 		return "UNIX A.out executable";
+	}
+
+	@Override
+	public boolean supportsLoadIntoProgram(Program program) {
+		return true;
 	}
 
 	/**
@@ -60,7 +67,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	 */
 	private long getBaseAddrOffset(List<Option> options) {
 		Address baseAddr = null;
-	
+
 		if (options != null) {
 			for (Option option : options) {
 				String optName = option.getName();
@@ -107,21 +114,40 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	public List<Option> getDefaultOptions(ByteProvider provider, LoadSpec loadSpec,
 			DomainObject domainObject, boolean loadIntoProgram) {
 		Address baseAddr = null;
+		boolean prefixSectionNamesWithFileName = false;
+
+		AddressFactory addressFactory = null;
 
 		if (domainObject instanceof Program) {
-			Program program = (Program) domainObject;
-			AddressFactory addressFactory = program.getAddressFactory();
+			final Program program = (Program) domainObject;
+			addressFactory = program.getAddressFactory();
+
+			prefixSectionNamesWithFileName = UnixAoutProgramLoader.mustPrefixSectionNames(program);
+		}
+
+		try {
+			if (addressFactory == null && loadSpec.getLanguageCompilerSpec() != null) {
+				addressFactory = loadSpec.getLanguageCompilerSpec().getLanguage().getAddressFactory();
+			}
+
 			if (addressFactory != null) {
-				AddressSpace defaultAddressSpace = addressFactory.getDefaultAddressSpace();
-				if (defaultAddressSpace != null) {
-					baseAddr = defaultAddressSpace.getAddress(0);
+				final AddressSpace defaultAddressSpace = addressFactory.getDefaultAddressSpace();
+				UnixAoutHeader hdrBE = new UnixAoutHeader(provider, false, null);
+				UnixAoutHeader hdrLE = new UnixAoutHeader(provider, true, null);
+
+				if (hdrBE.isValid()) {
+					baseAddr = defaultAddressSpace.getAddress(hdrBE.getTextAddr());
+				} else if (hdrLE.isValid()) {
+					baseAddr = defaultAddressSpace.getAddress(hdrLE.getTextAddr());
 				}
 			}
+		} catch (IOException e) {
 		}
 
 		List<Option> list = new ArrayList<Option>();
 		list.add(new Option(OPTION_NAME_BASE_ADDR, baseAddr, Address.class,
 				Loader.COMMAND_LINE_ARG_PREFIX + "-baseAddr"));
+		list.add(new Option(OPTION_PREFIX_SECTIONS_WITH_FILENAME, prefixSectionNamesWithFileName, Boolean.class, null));
 
 		list.addAll(super.getDefaultOptions(provider, loadSpec, domainObject, loadIntoProgram));
 		return list;
@@ -133,8 +159,8 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
 		// Attempt to parse the header as both little- and big-endian.
 		// It is likely that only one of these will produce sensible values.
-		UnixAoutHeader hdrBE = new UnixAoutHeader(provider, false);
-		UnixAoutHeader hdrLE = new UnixAoutHeader(provider, true);
+		UnixAoutHeader hdrBE = new UnixAoutHeader(provider, false, null);
+		UnixAoutHeader hdrLE = new UnixAoutHeader(provider, true, null);
 		boolean beValid = false;
 
 		if (hdrBE.isValid()) {
@@ -157,9 +183,13 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			Program program, TaskMonitor monitor, MessageLog log)
 			throws CancelledException, IOException {
 		final boolean isLittleEndian = !program.getLanguage().isBigEndian();
-		final UnixAoutHeader header = new UnixAoutHeader(provider, isLittleEndian);
 
+		final long baseAddr = getBaseAddrOffset(options);
+		final boolean prefixSectionNamesWithFileName = OptionUtils.getOption(OPTION_PREFIX_SECTIONS_WITH_FILENAME,
+				options, false);
+
+		final UnixAoutHeader header = new UnixAoutHeader(provider, isLittleEndian, baseAddr);
 		final UnixAoutProgramLoader loader = new UnixAoutProgramLoader(program, header, monitor, log);
-		loader.loadAout(getBaseAddrOffset(options));
+		loader.loadAout(prefixSectionNamesWithFileName);
 	}
 }
