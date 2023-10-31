@@ -88,9 +88,11 @@ public class UnixAoutHeader implements StructConverter {
 	 * @param provider       Source of header binary data
 	 * @param isLittleEndian Flag indicating whether to interpret the data as
 	 *                       little-endian.
+	 * @param baseAddr       Base address to apply.
 	 * @throws IOException
 	 */
-	public UnixAoutHeader(ByteProvider provider, boolean isLittleEndian) throws IOException {
+	public UnixAoutHeader(ByteProvider provider, boolean isLittleEndian, Long baseAddr)
+			throws IOException {
 		this.reader = new BinaryReader(provider, isLittleEndian);
 
 		this.a_magic = reader.readNextUnsignedInt();
@@ -128,7 +130,7 @@ public class UnixAoutHeader implements StructConverter {
 			this.strSize = reader.readUnsignedInt(this.strOffset);
 		}
 
-		determineTextAddr();
+		determineTextAddr(baseAddr);
 		this.txtEndAddr = this.txtAddr + this.a_text;
 		this.datAddr = (this.exeType == AoutType.OMAGIC) ? this.txtEndAddr : segmentRound(this.txtEndAddr);
 		this.bssAddr = this.datAddr + this.a_data;
@@ -512,14 +514,19 @@ public class UnixAoutHeader implements StructConverter {
 	 * Uses the combination of executable type and architecture to set the
 	 * appropriate
 	 * base address of the .text segment when loaded.
+	 *
+	 * @param baseAddr Base address to apply.
 	 */
-	private void determineTextAddr() {
+	private void determineTextAddr(Long baseAddr) {
+		if (baseAddr != null) {
+			this.txtAddr = baseAddr;
+			return;
+		}
 
 		if ((this.isSparc && (this.exeType == AoutType.NMAGIC)) ||
 				(this.isNetBSD) ||
 				(this.exeType == AoutType.QMAGIC)) {
 			this.txtAddr = this.pageSize;
-
 		} else {
 			this.txtAddr = 0;
 		}
